@@ -5,6 +5,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { useWebSocket } from '@/lib/hooks/useWebSocket';
 import { tasksService, goalsService, expensesService, debtsService, supabase } from '@/lib/supabase';
+import { cachedTasksService, cachedGoalsService, cachedExpensesService, cachedDebtsService, cacheInvalidators } from '@/lib/cache';
 import { websocketEventTypes, createWebSocketHandlers } from '@/lib/websocket-handlers';
 import Link from 'next/link';
 import { 
@@ -39,6 +40,7 @@ export default function DashboardHome() {
   });
   const [recentTasks, setRecentTasks] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadingStep, setLoadingStep] = useState('Initialisation...');
   const [userName, setUserName] = useState('');
 
   useEffect(() => {
@@ -49,6 +51,8 @@ export default function DashboardHome() {
   }, [user]);
 
   const loadUserName = async () => {
+    if (!user?.id) return;
+    
     try {
       // First try to get from users table
       const { data: userData, error } = await supabase
@@ -70,43 +74,50 @@ export default function DashboardHome() {
   };
 
   const loadDashboardData = async () => {
+    if (!user?.id) return;
+    
     try {
       const today = new Date().toLocaleDateString('en-CA');
       const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toLocaleDateString('en-CA');
 
-      // Charger les tâches d'aujourd'hui et les tâches non complétées
-      const todayTasksData = await tasksService.getTasksByDate(user.id, today);
-      const allTasks = await tasksService.getTasks(user.id);
+      setLoadingStep('Chargement des tâches...');
+      // Utilisation des services avec cache
+      const monthTasks = await cachedTasksService.getTasks(user.id, monthStart, today);
+      const todayTasks = monthTasks.filter(t => t.date === today);
       
-      const completedToday = todayTasksData?.filter(t => t.completed).length || 0;
-      const totalToday = todayTasksData?.length || 0;
-      const pendingToday = allTasks?.filter(t => 
+      const completedToday = todayTasks.filter(t => t.completed).length;
+      const totalToday = todayTasks.length;
+      const pendingToday = monthTasks.filter(t => 
         new Date(t.date) < new Date(today) && !t.completed
-      ).length || 0;
+      ).length;
 
-      // Charger les objectifs
-      const goalsData = await goalsService.getGoals(user.id);
-      const completedGoalsCount = goalsData?.filter(g => g.completed).length || 0;
+      setLoadingStep('Chargement des objectifs...');
+      // Charger les objectifs (avec cache)
+      const goalsData = await cachedGoalsService.getGoals(user.id);
+      const completedGoalsCount = goalsData.filter(g => g.completed).length;
 
-      // Charger les dépenses et entrées
-      const todayExpensesData = await expensesService.getExpensesByDate(user.id, today);
-      const monthExpensesData = await expensesService.getExpenses(user.id, monthStart, today);
+      setLoadingStep('Chargement des transactions...');
+      // Charger les dépenses (avec cache)
+      const monthExpensesData = await cachedExpensesService.getExpenses(user.id, monthStart, today);
+      const todayExpensesData = monthExpensesData.filter(e => e.date === today);
       
       // Séparer les dépenses et entrées
-      const todayExpenses = todayExpensesData?.filter(e => e.type === 'expense').reduce((sum, e) => sum + parseFloat(e.amount), 0) || 0;
-      const todayIncomes = todayExpensesData?.filter(e => e.type === 'income').reduce((sum, e) => sum + parseFloat(e.amount), 0) || 0;
-      const monthExpenses = monthExpensesData?.filter(e => e.type === 'expense').reduce((sum, e) => sum + parseFloat(e.amount), 0) || 0;
-      const monthIncomes = monthExpensesData?.filter(e => e.type === 'income').reduce((sum, e) => sum + parseFloat(e.amount), 0) || 0;
+      const todayExpenses = todayExpensesData.filter(e => e.type === 'expense').reduce((sum, e) => sum + parseFloat(e.amount), 0);
+      const todayIncomes = todayExpensesData.filter(e => e.type === 'income').reduce((sum, e) => sum + parseFloat(e.amount), 0);
+      const monthExpenses = monthExpensesData.filter(e => e.type === 'expense').reduce((sum, e) => sum + parseFloat(e.amount), 0);
+      const monthIncomes = monthExpensesData.filter(e => e.type === 'income').reduce((sum, e) => sum + parseFloat(e.amount), 0);
 
-      // Charger les dettes
-      const debtsData = await debtsService.getDebts(user.id);
-      const totalDebts = debtsData?.filter(d => d.type === 'owed').reduce((sum, d) => sum + parseFloat(d.amount), 0) || 0;
-      const overdueDebts = debtsData?.filter(d => d.type === 'owed' && d.status === 'pending' && new Date(d.due_date) < new Date()).length || 0;
+      setLoadingStep('Chargement des dettes...');
+      // Charger les dettes (avec cache)
+      const debtsData = await cachedDebtsService.getDebts(user.id);
+      const totalDebts = debtsData.filter(d => d.type === 'owed').reduce((sum, d) => sum + parseFloat(d.amount), 0);
+      const overdueDebts = debtsData.filter(d => d.type === 'owed' && d.status === 'pending' && new Date(d.due_date) < new Date()).length;
 
+      setLoadingStep('Finalisation...');
       setStats({
         todayTasks: totalToday,
         completedTasks: completedToday,
-        totalGoals: goalsData?.length || 0,
+        totalGoals: goalsData.length,
         completedGoals: completedGoalsCount,
         todayExpenses: todayExpenses,
         monthExpenses: monthExpenses,
@@ -116,7 +127,7 @@ export default function DashboardHome() {
         overdueDebts: overdueDebts
       });
 
-      setRecentTasks(todayTasksData?.slice(0, 3) || []);
+      setRecentTasks(todayTasks.slice(0, 3));
     } catch (error) {
       console.error('Erreur chargement dashboard:', error);
     } finally {
@@ -126,9 +137,12 @@ export default function DashboardHome() {
 
   // WebSocket handlers pour les mises à jour en temps réel du dashboard
   const updateStatsWithWebSocket = useCallback(() => {
-    // Recharger les stats quand un événement WebSocket est reçu
-    loadDashboardData();
-  }, []);
+    // Invalider le cache et recharger les stats
+    if (user?.id) {
+      cacheInvalidators.invalidateAll(user.id);
+      loadDashboardData();
+    }
+  }, [user?.id]);
 
   // S'abonner aux événements WebSocket
   useEffect(() => {
@@ -218,7 +232,8 @@ export default function DashboardHome() {
       <div className="flex items-center justify-center min-h-64">
         <div className="text-center">
           <div className="w-16 h-16 border-4 border-purple-200 border-t-purple-600 rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-600">Chargement de votre tableau de bord...</p>
+          <p className="text-gray-600 font-medium">{loadingStep}</p>
+          <p className="text-gray-400 text-sm mt-2">Chargement de votre tableau de bord...</p>
         </div>
       </div>
     );
