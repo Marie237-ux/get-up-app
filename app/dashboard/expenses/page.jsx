@@ -393,7 +393,7 @@ export default function ExpensesPage() {
             onClick={() => setViewMode('day')}
             className={`px-4 py-2 rounded-lg font-medium transition-all ${
               viewMode === 'day'
-                ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white'
+                ? 'bg-purple-600 text-white'
                 : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
             }`}
           >
@@ -403,7 +403,7 @@ export default function ExpensesPage() {
             onClick={() => setViewMode('month')}
             className={`px-4 py-2 rounded-lg font-medium transition-all ${
               viewMode === 'month'
-                ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white'
+                ? 'bg-purple-600 text-white'
                 : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
             }`}
           >
@@ -413,7 +413,7 @@ export default function ExpensesPage() {
             onClick={() => setViewMode('year')}
             className={`px-4 py-2 rounded-lg font-medium transition-all ${
               viewMode === 'year'
-                ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white'
+                ? 'bg-purple-600 text-white'
                 : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
             }`}
           >
@@ -473,7 +473,7 @@ export default function ExpensesPage() {
 
         <button
           onClick={() => setShowAddExpense(true)}
-          className="flex items-center gap-2 px-6 py-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-xl font-medium hover:shadow-xl transition-all"
+          className="flex items-center gap-2 px-6 py-2 bg-purple-600 text-white rounded-xl font-medium hover:bg-purple-700 transition-all"
         >
           <Plus className="w-5 h-5" />
           Ajouter
@@ -598,7 +598,7 @@ export default function ExpensesPage() {
             <button
               onClick={editingExpense ? updateExpense : addExpenseWithWebSocket}
               disabled={loading}
-              className="flex-1 bg-gradient-to-r from-purple-500 to-pink-500 text-white py-3 rounded-xl font-medium hover:shadow-lg transition-all disabled:opacity-50"
+              className="flex-1 bg-purple-600 text-white py-3 rounded-xl font-medium hover:bg-purple-700 transition-all disabled:opacity-50"
             >
               {loading ? (editingExpense ? 'Modification...' : 'Ajout...') : (editingExpense ? 'Modifier' : `Ajouter la ${newExpense.type === 'income' ? 'entrée' : 'dépense'}`)}
             </button>
