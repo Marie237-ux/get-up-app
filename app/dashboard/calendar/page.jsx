@@ -3,14 +3,11 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/lib/hooks/useAuth';
-import { useWebSocket } from '@/lib/hooks/useWebSocket';
 import { tasksService } from '@/lib/supabase';
-import { websocketEventTypes, createWebSocketHandlers } from '@/lib/websocket-handlers';
 import { Calendar, Plus, Check, Clock, Trash2, ChevronLeft, ChevronRight, AlertCircle, AlertTriangle, FileText, CheckCircle, Edit } from 'lucide-react';
 
 export default function CalendarPage() {
   const { user } = useAuth();
-  const { isConnected, subscribe, send } = useWebSocket(user?.id);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [tasks, setTasks] = useState([]);
@@ -301,157 +298,6 @@ export default function CalendarPage() {
     high: 'Haute'
   };
 
-  // WebSocket handlers pour les mises à jour en temps réel
-  const updateTaskInList = useCallback((task) => {
-    // Vérifier si la tâche appartient au mois courant
-    const taskDate = new Date(task.date);
-    const isInCurrentMonth = taskDate.getMonth() === currentMonth.getMonth() && 
-                           taskDate.getFullYear() === currentMonth.getFullYear();
-
-    if (isInCurrentMonth) {
-      setTasks(prev => {
-        const exists = prev.find(t => t.id === task.id);
-        if (exists) {
-          return prev.map(t => t.id === task.id ? task : t);
-        } else {
-          return [...prev, task];
-        }
-      });
-    }
-
-    // Vérifier si la tâche appartient au jour sélectionné
-    const isSelectedDay = taskDate.toDateString() === selectedDate.toDateString();
-    if (isSelectedDay) {
-      setDayTasks(prev => {
-        const exists = prev.find(t => t.id === task.id);
-        if (exists) {
-          return prev.map(t => t.id === task.id ? task : t);
-        } else {
-          return [...prev, task];
-        }
-      });
-    }
-  }, [currentMonth, selectedDate]);
-
-  const removeTaskFromList = useCallback((taskId) => {
-    setTasks(prev => prev.filter(t => t.id !== taskId));
-    setDayTasks(prev => prev.filter(t => t.id !== taskId));
-  }, []);
-
-  // S'abonner aux événements WebSocket
-  useEffect(() => {
-    if (!isConnected || !user) return;
-
-    const handlers = createWebSocketHandlers({
-      addTask: updateTaskInList,
-      updateTask: updateTaskInList,
-      deleteTask: removeTaskFromList
-    });
-
-    // S'abonner aux événements de tâches
-    const unsubscribeCreated = subscribe(websocketEventTypes.TASK_CREATED, handlers[websocketEventTypes.TASK_CREATED]);
-    const unsubscribeUpdated = subscribe(websocketEventTypes.TASK_UPDATED, handlers[websocketEventTypes.TASK_UPDATED]);
-    const unsubscribeDeleted = subscribe(websocketEventTypes.TASK_DELETED, handlers[websocketEventTypes.TASK_DELETED]);
-    const unsubscribeCompleted = subscribe(websocketEventTypes.TASK_COMPLETED, handlers[websocketEventTypes.TASK_COMPLETED]);
-
-    return () => {
-      unsubscribeCreated?.();
-      unsubscribeUpdated?.();
-      unsubscribeDeleted?.();
-      unsubscribeCompleted?.();
-    };
-  }, [isConnected, user, subscribe, updateTaskInList, removeTaskFromList]);
-
-  // Modifier les fonctions pour envoyer des événements WebSocket
-  const addTaskWithWebSocket = async () => {
-    setError('');
-    
-    if (!newTask.title.trim()) {
-      setError('Le titre est requis');
-      return;
-    }
-
-    // Vérifier conflit horaire
-    if (newTask.time) {
-      const conflit = dayTasks.find(t => t.time === newTask.time);
-      if (conflit) {
-        setError(`Conflit d'horaire ! "${conflit.title}" est déjà prévu à ${newTask.time}`);
-        return;
-      }
-    }
-
-    setLoading(true);
-    try {
-      const taskData = {
-        user_id: user.id,
-        date: selectedDate.toLocaleDateString('en-CA'),
-        ...newTask,
-        title: newTask.title.trim(),
-        notes: newTask.notes.trim() || null,
-        time: newTask.time || null
-      };
-
-      const createdTask = await tasksService.createTask(taskData);
-      
-      // Envoyer l'événement WebSocket
-      if (isConnected) {
-        send(websocketEventTypes.TASK_CREATED, createdTask);
-      }
-      
-      // Mise à jour locale immédiate
-      updateTaskInList(createdTask);
-      
-      setNewTask({ title: '', time: '', notes: '', priority: 'normal' });
-      setShowAddTask(false);
-      setSuccessMessage('Tâche ajoutée avec succès !');
-      setTimeout(() => setSuccessMessage(''), 3000);
-    } catch (err) {
-      setError(err.message || 'Erreur lors de l\'ajout de la tâche');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const toggleCompleteWithWebSocket = async (taskId, completed) => {
-    try {
-      await tasksService.toggleComplete(taskId, !completed);
-      
-      // Envoyer l'événement WebSocket
-      if (isConnected) {
-        send(websocketEventTypes.TASK_COMPLETED, { id: taskId, completed: !completed });
-      }
-      
-      // Mise à jour locale immédiate
-      const updateLists = (taskList) => 
-        taskList.map(t => t.id === taskId ? { ...t, completed: !completed } : t);
-      
-      setTasks(updateLists);
-      setDayTasks(updateLists);
-    } catch (err) {
-      console.error('Erreur toggle:', err);
-    }
-  };
-
-  const confirmDeleteWithWebSocket = async (taskId) => {
-    try {
-     await tasksService.deleteTask(taskId);
-      
-      // Envoyer l'événement WebSocket
-      if (isConnected) {
-        send(websocketEventTypes.TASK_DELETED, taskId);
-      }
-      
-      // Mise à jour locale immédiate
-      removeTaskFromList(taskId);
-      
-      setShowConfirmDelete(null);
-      setSuccessMessage('Tâche supprimée avec succès !');
-      setTimeout(() => setSuccessMessage(''), 3000);
-    } catch (err) {
-      console.error('Erreur suppression:', err);
-    }
-  };
-
   return (
     <div>
       {/* Header */}
@@ -621,7 +467,7 @@ export default function CalendarPage() {
                   
                   <div className="flex gap-2">
                     <button
-                      onClick={editingTask ? updateTask : addTaskWithWebSocket}
+                      onClick={editingTask ? updateTask : addTask}
                       disabled={loading}
                       className="flex-1 bg-gradient-to-r from-purple-500 to-pink-500 text-white py-2 rounded-xl font-medium hover:shadow-lg transition-all disabled:opacity-50 text-sm"
                     >
@@ -657,7 +503,7 @@ export default function CalendarPage() {
                     >
                       <div className="flex items-start gap-3">
                         <button
-                          onClick={() => toggleCompleteWithWebSocket(task.id, task.completed)}
+                          onClick={() => toggleComplete(task.id, task.completed)}
                           className={`mt-1 w-5 h-5 sm:w-6 sm:h-6 rounded-lg border-2 flex items-center justify-center transition-all flex-shrink-0 ${
                             task.completed
                               ? 'bg-gradient-to-br from-purple-500 to-pink-500 border-purple-500'
@@ -746,7 +592,7 @@ export default function CalendarPage() {
             </p>
             <div className="flex gap-3">
               <button
-                onClick={() => confirmDeleteWithWebSocket(showConfirmDelete)}
+                onClick={() => confirmDelete(showConfirmDelete)}
                 className="flex-1 bg-red-500 text-white py-2.5 rounded-xl font-medium hover:bg-red-600 transition-all"
               >
                 Supprimer

@@ -3,15 +3,12 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/lib/hooks/useAuth';
-import { useWebSocket } from '@/lib/hooks/useWebSocket';
 import { expensesService } from '@/lib/supabase';
-import { websocketEventTypes, createWebSocketHandlers } from '@/lib/websocket-handlers';
 import { DollarSign, Plus, Trash2, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Calendar as CalendarIcon, CheckCircle, Edit } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 
 export default function ExpensesPage() {
   const { user } = useAuth();
-  const { isConnected, subscribe, send } = useWebSocket(user?.id);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [expenses, setExpenses] = useState([]);
   const [dayExpenses, setDayExpenses] = useState([]);
@@ -253,131 +250,6 @@ export default function ExpensesPage() {
   const monthNames = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 
                       'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
 
-  // WebSocket handlers pour les mises à jour en temps réel
-  const updateExpenseInList = useCallback((expense) => {
-    // Vérifier si la dépense appartient à la période courante
-    const expenseDate = new Date(expense.date);
-    const isInCurrentPeriod = viewMode === 'day' 
-      ? expenseDate.toDateString() === selectedDate.toDateString()
-      : (expenseDate.getMonth() === selectedDate.getMonth() && 
-         expenseDate.getFullYear() === selectedDate.getFullYear());
-
-    if (isInCurrentPeriod) {
-      if (viewMode === 'day') {
-        setDayExpenses(prev => {
-          const exists = prev.find(e => e.id === expense.id);
-          if (exists) {
-            return prev.map(e => e.id === expense.id ? expense : e);
-          } else {
-            return [...prev, expense];
-          }
-        });
-      } else {
-        setExpenses(prev => {
-          const exists = prev.find(e => e.id === expense.id);
-          if (exists) {
-            return prev.map(e => e.id === expense.id ? expense : e);
-          } else {
-            return [...prev, expense];
-          }
-        });
-      }
-    }
-  }, [viewMode, selectedDate]);
-
-  const removeExpenseFromList = useCallback((expenseId) => {
-    if (viewMode === 'day') {
-      setDayExpenses(prev => prev.filter(e => e.id !== expenseId));
-    } else {
-      setExpenses(prev => prev.filter(e => e.id !== expenseId));
-    }
-  }, [viewMode]);
-
-  // S'abonner aux événements WebSocket
-  useEffect(() => {
-    if (!isConnected || !user) return;
-
-    const handlers = createWebSocketHandlers({
-      addExpense: updateExpenseInList,
-      updateExpense: updateExpenseInList,
-      deleteExpense: removeExpenseFromList
-    });
-
-    // S'abonner aux événements de dépenses
-    const unsubscribeCreated = subscribe(websocketEventTypes.EXPENSE_CREATED, handlers[websocketEventTypes.EXPENSE_CREATED]);
-    const unsubscribeUpdated = subscribe(websocketEventTypes.EXPENSE_UPDATED, handlers[websocketEventTypes.EXPENSE_UPDATED]);
-    const unsubscribeDeleted = subscribe(websocketEventTypes.EXPENSE_DELETED, handlers[websocketEventTypes.EXPENSE_DELETED]);
-
-    return () => {
-      unsubscribeCreated?.();
-      unsubscribeUpdated?.();
-      unsubscribeDeleted?.();
-    };
-  }, [isConnected, user, subscribe, updateExpenseInList, removeExpenseFromList]);
-
-  // Modifier les fonctions pour envoyer des événements WebSocket
-  const addExpenseWithWebSocket = async () => {
-    if (!newExpense.amount || parseFloat(newExpense.amount) <= 0) return;
-    
-    setLoading(true);
-    try {
-      const expenseData = {
-        user_id: user.id,
-        type: newExpense.type,
-        date: selectedDate.toISOString().split('T')[0],
-        amount: parseFloat(newExpense.amount),
-        category: newExpense.category,
-        description: newExpense.description.trim() || null,
-        payment_method: newExpense.payment_method
-      };
-
-      const createdExpense = await expensesService.createExpense(expenseData);
-      
-      // Envoyer l'événement WebSocket
-      if (isConnected) {
-        send(websocketEventTypes.EXPENSE_CREATED, createdExpense);
-      }
-      
-      // Mise à jour locale immédiate
-      updateExpenseInList(createdExpense);
-      
-      setNewExpense({ 
-        type: 'expense',
-        amount: '', 
-        category: 'alimentation', 
-        description: '', 
-        payment_method: 'especes' 
-      });
-      setShowAddExpense(false);
-      setSuccessMessage('Transaction ajoutée avec succès !');
-      setTimeout(() => setSuccessMessage(''), 3000);
-    } catch (err) {
-      console.error('Erreur ajout dépense:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const confirmDeleteWithWebSocket = async (expenseId) => {
-    try {
-      await expensesService.deleteExpense(expenseId);
-      
-      // Envoyer l'événement WebSocket
-      if (isConnected) {
-        send(websocketEventTypes.EXPENSE_DELETED, expenseId);
-      }
-      
-      // Mise à jour locale immédiate
-      removeExpenseFromList(expenseId);
-      
-      setShowConfirmDelete(null);
-      setSuccessMessage('Transaction supprimée avec succès !');
-      setTimeout(() => setSuccessMessage(''), 3000);
-    } catch (err) {
-      console.error('Erreur suppression:', err);
-    }
-  };
-
   return (
     <div>
       {/* Header */}
@@ -596,7 +468,7 @@ export default function ExpensesPage() {
 
           <div className="flex gap-2">
             <button
-              onClick={editingExpense ? updateExpense : addExpenseWithWebSocket}
+              onClick={editingExpense ? updateExpense : addExpense}
               disabled={loading}
               className="flex-1 bg-purple-600 text-white py-3 rounded-xl font-medium hover:bg-purple-700 transition-all disabled:opacity-50"
             >
@@ -750,7 +622,7 @@ export default function ExpensesPage() {
             </p>
             <div className="flex gap-3">
               <button
-                onClick={() => confirmDeleteWithWebSocket(showConfirmDelete)}
+                onClick={() => confirmDelete(showConfirmDelete)}
                 className="flex-1 bg-red-500 text-white py-2.5 rounded-xl font-medium hover:bg-red-600 transition-all"
               >
                 Supprimer

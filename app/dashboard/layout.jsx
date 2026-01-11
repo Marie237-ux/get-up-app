@@ -115,35 +115,11 @@ export default function DashboardLayout({ children }) {
                 >
                   <item.icon className={`w-5 h-5 ${isActive ? 'text-white' : 'text-gray-400 group-hover:text-purple-600'}`} />
                   <span>{item.name}</span>
-                  {isActive && (
-                    <div className="ml-auto w-2 h-2 bg-white rounded-full animate-pulse" />
-                  )}
                 </Link>
               );
             })}
-            
-            {/* Administration - uniquement pour les admins */}
-            {isAdmin && (
-              <Link
-                href="/dashboard/administration"
-                onClick={() => setSidebarOpen(false)}
-                className={`
-                  flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-all duration-200 group
-                  ${pathname === '/dashboard/administration'
-                    ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-lg'
-                    : 'text-gray-600 hover:bg-purple-50 hover:text-purple-600'
-                  }
-                `}
-              >
-                <Shield className={`w-5 h-5 ${pathname === '/dashboard/administration' ? 'text-white' : 'text-gray-400 group-hover:text-purple-600'}`} />
-                <span>Administration</span>
-                {pathname === '/dashboard/administration' && (
-                  <div className="ml-auto w-2 h-2 bg-white rounded-full animate-pulse" />
-                )}
-              </Link>
-            )}
           </nav>
-
+            
           {/* User info et déconnexion (mobile only) */}
           <div className="lg:hidden p-4 border-t border-purple-100">
             <div className="mb-4 p-3 bg-gradient-to-r from-purple-50 to-pink-50 rounded-xl">

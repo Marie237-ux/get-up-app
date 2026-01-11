@@ -3,10 +3,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/lib/hooks/useAuth';
-import { useWebSocket } from '@/lib/hooks/useWebSocket';
 import { tasksService, goalsService, expensesService, debtsService, supabase } from '@/lib/supabase';
-import { cachedTasksService, cachedGoalsService, cachedExpensesService, cachedDebtsService, cacheInvalidators } from '@/lib/cache';
-import { websocketEventTypes, createWebSocketHandlers } from '@/lib/websocket-handlers';
 import Link from 'next/link';
 import { 
   Calendar, 
@@ -25,7 +22,6 @@ import {
 
 export default function DashboardHome() {
   const { user } = useAuth();
-  const { isConnected, subscribe, send } = useWebSocket(user?.id);
   const [stats, setStats] = useState({
     todayTasks: 0,
     completedTasks: 0,
@@ -81,8 +77,8 @@ export default function DashboardHome() {
       const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toLocaleDateString('en-CA');
 
       setLoadingStep('Chargement des tâches...');
-      // Utilisation des services avec cache
-      const monthTasks = await cachedTasksService.getTasks(user.id, monthStart, today);
+      // Utilisation des services directs
+      const monthTasks = await tasksService.getTasks(user.id, monthStart, today);
       const todayTasks = monthTasks.filter(t => t.date === today);
       
       const completedToday = todayTasks.filter(t => t.completed).length;
@@ -92,13 +88,13 @@ export default function DashboardHome() {
       ).length;
 
       setLoadingStep('Chargement des objectifs...');
-      // Charger les objectifs (avec cache)
-      const goalsData = await cachedGoalsService.getGoals(user.id);
+      // Charger les objectifs (sans cache)
+      const goalsData = await goalsService.getGoals(user.id);
       const completedGoalsCount = goalsData.filter(g => g.completed).length;
 
       setLoadingStep('Chargement des transactions...');
-      // Charger les dépenses (avec cache)
-      const monthExpensesData = await cachedExpensesService.getExpenses(user.id, monthStart, today);
+      // Charger les dépenses (sans cache)
+      const monthExpensesData = await expensesService.getExpenses(user.id, monthStart, today);
       const todayExpensesData = monthExpensesData.filter(e => e.date === today);
       
       // Séparer les dépenses et entrées
@@ -108,8 +104,8 @@ export default function DashboardHome() {
       const monthIncomes = monthExpensesData.filter(e => e.type === 'income').reduce((sum, e) => sum + parseFloat(e.amount), 0);
 
       setLoadingStep('Chargement des dettes...');
-      // Charger les dettes (avec cache)
-      const debtsData = await cachedDebtsService.getDebts(user.id);
+      // Charger les dettes (sans cache)
+      const debtsData = await debtsService.getDebts(user.id);
       const totalDebts = debtsData.filter(d => d.type === 'owed').reduce((sum, d) => sum + parseFloat(d.amount), 0);
       const overdueDebts = debtsData.filter(d => d.type === 'owed' && d.status === 'pending' && new Date(d.due_date) < new Date()).length;
 
@@ -134,64 +130,6 @@ export default function DashboardHome() {
       setLoading(false);
     }
   };
-
-  // WebSocket handlers pour les mises à jour en temps réel du dashboard
-  const updateStatsWithWebSocket = useCallback(() => {
-    // Invalider le cache et recharger les stats
-    if (user?.id) {
-      cacheInvalidators.invalidateAll(user.id);
-      loadDashboardData();
-    }
-  }, [user?.id]);
-
-  // S'abonner aux événements WebSocket
-  useEffect(() => {
-    if (!isConnected || !user) return;
-
-    const handlers = createWebSocketHandlers({
-      // Pour les tâches
-      addTask: updateStatsWithWebSocket,
-      updateTask: updateStatsWithWebSocket,
-      deleteTask: updateStatsWithWebSocket,
-      // Pour les objectifs
-      addGoal: updateStatsWithWebSocket,
-      updateGoal: updateStatsWithWebSocket,
-      deleteGoal: updateStatsWithWebSocket,
-      // Pour les dépenses
-      addExpense: updateStatsWithWebSocket,
-      updateExpense: updateStatsWithWebSocket,
-      deleteExpense: updateStatsWithWebSocket
-    });
-
-    // S'abonner à tous les événements pertinents
-    const unsubscribeTaskCreated = subscribe(websocketEventTypes.TASK_CREATED, handlers[websocketEventTypes.TASK_CREATED]);
-    const unsubscribeTaskUpdated = subscribe(websocketEventTypes.TASK_UPDATED, handlers[websocketEventTypes.TASK_UPDATED]);
-    const unsubscribeTaskDeleted = subscribe(websocketEventTypes.TASK_DELETED, handlers[websocketEventTypes.TASK_DELETED]);
-    const unsubscribeTaskCompleted = subscribe(websocketEventTypes.TASK_COMPLETED, handlers[websocketEventTypes.TASK_COMPLETED]);
-    
-    const unsubscribeGoalCreated = subscribe(websocketEventTypes.GOAL_CREATED, handlers[websocketEventTypes.GOAL_CREATED]);
-    const unsubscribeGoalUpdated = subscribe(websocketEventTypes.GOAL_UPDATED, handlers[websocketEventTypes.GOAL_UPDATED]);
-    const unsubscribeGoalDeleted = subscribe(websocketEventTypes.GOAL_DELETED, handlers[websocketEventTypes.GOAL_DELETED]);
-    const unsubscribeGoalProgress = subscribe(websocketEventTypes.GOAL_PROGRESS_UPDATED, handlers[websocketEventTypes.GOAL_PROGRESS_UPDATED]);
-    
-    const unsubscribeExpenseCreated = subscribe(websocketEventTypes.EXPENSE_CREATED, handlers[websocketEventTypes.EXPENSE_CREATED]);
-    const unsubscribeExpenseUpdated = subscribe(websocketEventTypes.EXPENSE_UPDATED, handlers[websocketEventTypes.EXPENSE_UPDATED]);
-    const unsubscribeExpenseDeleted = subscribe(websocketEventTypes.EXPENSE_DELETED, handlers[websocketEventTypes.EXPENSE_DELETED]);
-
-    return () => {
-      unsubscribeTaskCreated?.();
-      unsubscribeTaskUpdated?.();
-      unsubscribeTaskDeleted?.();
-      unsubscribeTaskCompleted?.();
-      unsubscribeGoalCreated?.();
-      unsubscribeGoalUpdated?.();
-      unsubscribeGoalDeleted?.();
-      unsubscribeGoalProgress?.();
-      unsubscribeExpenseCreated?.();
-      unsubscribeExpenseUpdated?.();
-      unsubscribeExpenseDeleted?.();
-    };
-  }, [isConnected, user, subscribe, updateStatsWithWebSocket]);
 
   const quickActions = [
     {

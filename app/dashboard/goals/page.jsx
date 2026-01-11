@@ -3,14 +3,11 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/lib/hooks/useAuth';
-import { useWebSocket } from '@/lib/hooks/useWebSocket';
 import { goalsService } from '@/lib/supabase';
-import { websocketEventTypes, createWebSocketHandlers } from '@/lib/websocket-handlers';
 import { Target, Plus, Check, Trash2, Edit2, X, TrendingUp, Calendar as CalendarIcon, CheckCircle } from 'lucide-react';
 
 export default function GoalsPage() {
   const { user } = useAuth();
-  const { isConnected, subscribe, send } = useWebSocket(user?.id);
   const [goals, setGoals] = useState([]);
   const [showAddGoal, setShowAddGoal] = useState(false);
   const [editingGoal, setEditingGoal] = useState(null);
@@ -146,152 +143,6 @@ export default function GoalsPage() {
 
   const getCategoryLabel = (category) => {
     return categories.find(c => c.value === category)?.label || 'Autre';
-  };
-
-  // WebSocket handlers pour les mises à jour en temps réel
-  const updateGoalInList = useCallback((goal) => {
-    setGoals(prev => {
-      const exists = prev.find(g => g.id === goal.id);
-      if (exists) {
-        return prev.map(g => g.id === goal.id ? goal : g);
-      } else {
-        return [...prev, goal];
-      }
-    });
-  }, []);
-
-  const removeGoalFromList = useCallback((goalId) => {
-    setGoals(prev => prev.filter(g => g.id !== goalId));
-  }, []);
-
-  // S'abonner aux événements WebSocket
-  useEffect(() => {
-    if (!isConnected || !user) return;
-
-    const handlers = createWebSocketHandlers({
-      addGoal: updateGoalInList,
-      updateGoal: updateGoalInList,
-      deleteGoal: removeGoalFromList
-    });
-
-    // S'abonner aux événements d'objectifs
-    const unsubscribeCreated = subscribe(websocketEventTypes.GOAL_CREATED, handlers[websocketEventTypes.GOAL_CREATED]);
-    const unsubscribeUpdated = subscribe(websocketEventTypes.GOAL_UPDATED, handlers[websocketEventTypes.GOAL_UPDATED]);
-    const unsubscribeDeleted = subscribe(websocketEventTypes.GOAL_DELETED, handlers[websocketEventTypes.GOAL_DELETED]);
-    const unsubscribeProgress = subscribe(websocketEventTypes.GOAL_PROGRESS_UPDATED, handlers[websocketEventTypes.GOAL_PROGRESS_UPDATED]);
-
-    return () => {
-      unsubscribeCreated?.();
-      unsubscribeUpdated?.();
-      unsubscribeDeleted?.();
-      unsubscribeProgress?.();
-    };
-  }, [isConnected, user, subscribe, updateGoalInList, removeGoalFromList]);
-
-  // Modifier les fonctions pour envoyer des événements WebSocket
-  const addGoalWithWebSocket = async () => {
-    if (!newGoal.title.trim()) return;
-    
-    setLoading(true);
-    try {
-      const goalData = {
-        user_id: user.id,
-        ...newGoal,
-        title: newGoal.title.trim(),
-        description: newGoal.description.trim() || null,
-        deadline: newGoal.deadline || null
-      };
-
-      const createdGoal = await goalsService.createGoal(goalData);
-      
-      // Envoyer l'événement WebSocket
-      if (isConnected) {
-        send(websocketEventTypes.GOAL_CREATED, createdGoal);
-      }
-      
-      // Mise à jour locale immédiate
-      updateGoalInList(createdGoal);
-      
-      setNewGoal({ title: '', description: '', deadline: '', category: 'personnel' });
-      setShowAddGoal(false);
-      setSuccessMessage('Objectif créé avec succès !');
-      setTimeout(() => setSuccessMessage(''), 3000);
-    } catch (err) {
-      console.error('Erreur ajout objectif:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const updateGoalWithWebSocket = async () => {
-    if (!editingGoal.title.trim()) return;
-    
-    setLoading(true);
-    try {
-      await goalsService.updateGoal(editingGoal.id, {
-        title: editingGoal.title.trim(),
-        description: editingGoal.description?.trim() || null,
-        deadline: editingGoal.deadline || null,
-        category: editingGoal.category,
-        progress: editingGoal.progress
-      });
-      
-      const updatedGoal = { ...editingGoal, title: editingGoal.title.trim() };
-      
-      // Envoyer l'événement WebSocket
-      if (isConnected) {
-        send(websocketEventTypes.GOAL_UPDATED, updatedGoal);
-      }
-      
-      // Mise à jour locale immédiate
-      updateGoalInList(updatedGoal);
-      
-      setEditingGoal(null);
-      setSuccessMessage('Objectif mis à jour avec succès !');
-      setTimeout(() => setSuccessMessage(''), 3000);
-    } catch (err) {
-      console.error('Erreur mise à jour objectif:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const confirmDeleteWithWebSocket = async (goalId) => {
-    try {
-      await goalsService.deleteGoal(goalId);
-      
-      // Envoyer l'événement WebSocket
-      if (isConnected) {
-        send(websocketEventTypes.GOAL_DELETED, goalId);
-      }
-      
-      // Mise à jour locale immédiate
-      removeGoalFromList(goalId);
-      
-      setShowConfirmDelete(null);
-      setSuccessMessage('Objectif supprimé avec succès !');
-      setTimeout(() => setSuccessMessage(''), 3000);
-    } catch (err) {
-      console.error('Erreur suppression:', err);
-    }
-  };
-
-  const updateProgressWithWebSocket = async (goalId, progress) => {
-    try {
-      await goalsService.updateProgress(goalId, progress);
-      
-      // Envoyer l'événement WebSocket
-      if (isConnected) {
-        send(websocketEventTypes.GOAL_PROGRESS_UPDATED, { id: goalId, progress });
-      }
-      
-      // Mise à jour locale immédiate
-      setGoals(prev => prev.map(g => 
-        g.id === goalId ? { ...g, progress } : g
-      ));
-    } catch (err) {
-      console.error('Erreur mise à jour progression:', err);
-    }
   };
 
   const filteredGoals = goals.filter(goal => {
@@ -502,7 +353,7 @@ export default function GoalsPage() {
 
             <div className="flex gap-3 pt-2">
               <button
-                onClick={addGoalWithWebSocket}
+                onClick={addGoal}
                 disabled={loading}
                 className="flex-1 bg-gradient-to-r from-purple-500 to-pink-500 text-white py-3 rounded-2xl font-medium hover:shadow-lg transition-all disabled:opacity-50 text-sm sm:text-base shadow-md hover:shadow-xl transform hover:scale-[1.02] active:scale-[0.98]"
               >
@@ -602,7 +453,7 @@ export default function GoalsPage() {
 
                     <div className="flex gap-3 pt-2">
                       <button
-                        onClick={updateGoalWithWebSocket}
+                        onClick={updateGoal}
                         disabled={loading}
                         className="flex-1 bg-gradient-to-r from-purple-500 to-pink-500 text-white py-3 rounded-2xl font-medium hover:shadow-lg transition-all disabled:opacity-50 text-sm sm:text-base shadow-md hover:shadow-xl transform hover:scale-[1.02] active:scale-[0.98]"
                       >
@@ -678,7 +529,7 @@ export default function GoalsPage() {
                         min="0"
                         max="100"
                         value={goal.progress}
-                        onChange={(e) => updateProgressWithWebSocket(goal.id, parseInt(e.target.value))}
+                        onChange={(e) => updateProgress(goal.id, parseInt(e.target.value))}
                         className="w-full mt-2"
                       />
                     </div>
@@ -792,7 +643,7 @@ export default function GoalsPage() {
             </p>
             <div className="flex gap-3">
               <button
-                onClick={() => confirmDeleteWithWebSocket(showConfirmDelete)}
+                onClick={() => confirmDelete(showConfirmDelete)}
                 className="flex-1 bg-red-500 text-white py-2.5 rounded-xl font-medium hover:bg-red-600 transition-all"
               >
                 Supprimer
